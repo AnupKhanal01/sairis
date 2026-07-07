@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SAIRIS — South Asia Industrial Risk Information System
 
-## Getting Started
+Next.js + Firebase portal for industrial-accident situational awareness across South Asia
+(Nepal primary, plus India, Bangladesh, Pakistan, Sri Lanka): a live-synced industrial site
+register, historical accident database, admin-reviewed news feed, a manually-curated
+government-agency feed, citizen reporting, and a misinformation-verification board.
 
-First, run the development server:
+## 1. Create the Firebase project (one-time, do this yourself)
+
+1. Go to [console.firebase.google.com](https://console.firebase.google.com) → **Add project**.
+2. **Build → Firestore Database** → Create database → start in **production mode**, pick a
+   region close to South Asia (e.g. `asia-south1`).
+3. **Build → Authentication** → Sign-in method → enable **Email/Password**.
+4. **Authentication → Users → Add user** — create the one email/password account you'll use
+   to sign into `/admin`. There is no public sign-up page by design.
+5. **Project settings (gear icon) → General → Your apps → Add app → Web** — copy the config
+   values into `.env.local` (`NEXT_PUBLIC_FIREBASE_*`, see `.env.local.example`).
+6. **Project settings → Service accounts → Generate new private key** — downloads a JSON file.
+   Copy `project_id`, `client_email`, and `private_key` into `.env.local`
+   (`FIREBASE_ADMIN_*`). Keep the `\n` sequences in `private_key` literal (don't turn them into
+   real newlines in the `.env.local` file).
+7. Pick a random string for `CRON_SECRET` in `.env.local`.
+8. (Optional, needed for the ReliefWeb auto-pull) Register a free `appname` at
+   [apidoc.reliefweb.int](https://apidoc.reliefweb.int) and set `RELIEFWEB_APPNAME`.
+9. Deploy the security rules and indexes in this repo so the database actually enforces the
+   admin-only write rules:
+   ```bash
+   npx firebase-tools login
+   npx firebase-tools deploy --only firestore:rules,firestore:indexes --project <your-project-id>
+   ```
+   (Or paste `firestore.rules` into Firebase console → Firestore → Rules manually, and create
+   the two composite indexes in `firestore.indexes.json` — Firestore will also offer to
+   auto-create them the first time a query needs one, via a link in the browser console error.)
+
+## 2. Install, seed, run
 
 ```bash
+npm install
+npm run seed   # pushes the industrial-site register + historical accident dataset,
+                # and (optionally) registers the admin user you created in step 1.4
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`. Sign in at `/admin/login` with the account you created in step 4.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Re-running `npm run seed` is safe — sites/accidents are keyed by a stable slug and written with
+`merge: true`, so it won't duplicate records.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 3. What's actually live vs. admin-curated
 
-## Learn More
+- **Industrial sites & historical accidents** (`/gis`, `/analytics`) — admin-managed via
+  `/admin/sites` and `/admin/accidents`; every visitor's browser updates instantly on save
+  (Firestore `onSnapshot`), no page refresh.
+- **News feed** (`/social`, left column) — genuinely automated: `/admin/news` has "Refresh from
+  ReliefWeb" / "Refresh from GDACS" buttons that call the two ingestion API routes
+  (`src/app/api/ingest/*/route.ts`), which pull from ReliefWeb's public API and GDACS's public
+  hazard RSS feed into a **draft queue**. An admin reviews and publishes each item — nothing
+  reaches the public feed unreviewed. In production, `vercel.json` also schedules these on a
+  cron (note: Vercel's Hobby plan limits cron frequency to once/day — the manual refresh buttons
+  work regardless of plan).
+- **Government agency feed** (`/social`, right column) — NDRRMA, Nepal Police and NEOC do not
+  expose any public API or RSS feed (verified by research before building this — they publish
+  via Twitter/X and Facebook only). This feed is intentionally manual: an admin reads the
+  agency's real post and adds it via `/admin/social`, with a link back to the original. It is
+  "real-time" in the sense that it publishes to every visitor the instant an admin adds it, not
+  in the sense of an unattended pull from the agency.
+- **Citizen reports & misinformation board** — public can submit; only an authenticated admin
+  (checked against Firestore security rules, not just UI) can reclassify a misinfo item or
+  delete a report.
 
-To learn more about Next.js, take a look at the following resources:
+## 4. Admin access model
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Firebase Auth email/password, no public sign-up. `admins/{uid}` documents in Firestore are the
+source of truth for who's an admin — checked both client-side (route guard in
+`src/app/admin/(protected)/layout.tsx`) and, more importantly, in `firestore.rules` (so the gate
+holds even if someone bypasses the UI). Add more admins by creating their Firebase Auth user in
+the console and re-running `npm run seed` (it'll prompt for the email to register), or by adding
+a document directly at `admins/{their-uid}` in the Firestore console.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 5. Deploying
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Push to a git repo and import into Vercel; add all the `.env.local` values as Vercel
+environment variables (the `FIREBASE_ADMIN_PRIVATE_KEY` value pastes in fine with its literal
+`\n`s). The cron jobs in `vercel.json` will start firing once deployed.
