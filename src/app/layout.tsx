@@ -44,8 +44,8 @@ export default function RootLayout({
         </div>
         <footer className="foot">
           SAIRIS · South Asia Industrial Risk Information System · Disaster Information
-          Portal, Industrial Accident scenario · Facility coordinates are approximate
-          demonstration data pending district-level survey verification
+          Portal, Industrial Accident scenario · Sites flagged &quot;approximate&quot; in the
+          admin panel use district-center coordinates pending on-site survey verification
         </footer>
       </body>
     </html>
