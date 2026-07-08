@@ -15,7 +15,39 @@ service cloud.firestore {
 
     match /industrialSites/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isValidCrowdVote();
+
+      // A public visitor may cast exactly one "working fine" / "problem" vote per
+      // request: only the four crowd-vote fields may change, and one of the two
+      // counters must move by exactly +1. crowdFlagged can only be set to true by
+      // the math (>=50 total votes, >80% "problem"), never cleared by a public
+      // write — only an admin can revert it, via /admin/crowd-flags. Split into two
+      // helpers because a single function is capped at 10 `let` bindings.
+      function isValidCrowdVote() {
+        return voteDeltaValid() && flagTransitionValid();
+      }
+
+      function voteDeltaValid() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let touchedOnly = after.diff(before).affectedKeys()
+          .hasOnly(['votesFine', 'votesProblem', 'crowdFlagged', 'crowdFlaggedAt']);
+        let fineDelta = after.get('votesFine', 0) - before.get('votesFine', 0);
+        let problemDelta = after.get('votesProblem', 0) - before.get('votesProblem', 0);
+        let exactlyOneVote = (fineDelta == 1 && problemDelta == 0) || (fineDelta == 0 && problemDelta == 1);
+        return touchedOnly && exactlyOneVote;
+      }
+
+      function flagTransitionValid() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let total = after.get('votesFine', 0) + after.get('votesProblem', 0);
+        let wasFlagged = before.get('crowdFlagged', false) == true;
+        let afterFlagged = after.get('crowdFlagged', false) == true;
+        let flagMathValid = afterFlagged == (total >= 50 && after.get('votesProblem', 0) * 100 > total * 80);
+        return wasFlagged ? afterFlagged == true : flagMathValid;
+      }
     }
 
     match /historicalAccidents/{id} {

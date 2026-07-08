@@ -1,6 +1,5 @@
 {
   "crons": [
-    { "path": "/api/ingest/reliefweb", "schedule": "0 3 * * *" },
     { "path": "/api/ingest/gdacs", "schedule": "30 3 * * *" }
   ]
 }

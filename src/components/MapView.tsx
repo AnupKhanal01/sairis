@@ -2,9 +2,10 @@
 
 import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot, runTransaction } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { IndustrialSite, HistoricalAccident } from "@/lib/types";
+import { VOTE_THRESHOLD_COUNT, VOTE_FLAG_RATIO } from "@/lib/types";
 import type * as LeafletNS from "leaflet";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -12,6 +13,59 @@ const STATUS_COLOR: Record<string, string> = {
   watch: "#F2A900",
   incident: "#D6483C",
 };
+
+const VOTED_KEY_PREFIX = "sairis:voted:";
+
+function votePopupHtml(site: IndustrialSite): string {
+  const alreadyVoted =
+    typeof window !== "undefined" && localStorage.getItem(VOTED_KEY_PREFIX + site.id) !== null;
+  const fine = site.votesFine || 0;
+  const problem = site.votesProblem || 0;
+  const total = fine + problem;
+
+  const flagBanner = site.crowdFlagged
+    ? `<div style="margin-top:8px;padding:7px 9px;border:1px solid #D6483C;border-radius:4px;color:#D6483C;font-size:11px;">⚠ Community-flagged as having a problem (${problem}/${total} reports) — pending admin verification</div>`
+    : "";
+
+  const voteBlock = alreadyVoted
+    ? `<div style="margin-top:10px;font-size:11px;color:#8B95A1;">You've already reported on this site${total ? ` · ${total} community reports so far` : ""}.</div>`
+    : `<div style="margin-top:10px;">
+        <div style="font-size:10.5px;color:#8B95A1;margin-bottom:5px;">Is this site operating normally right now?</div>
+        <button class="btn-ghost sairis-vote-btn" data-site="${site.id}" data-vote="fine" style="margin-right:6px;">✅ Working fine</button>
+        <button class="btn-danger sairis-vote-btn" data-site="${site.id}" data-vote="problem">⚠️ Report a problem</button>
+        <div class="sairis-vote-status" data-status-for="${site.id}" style="margin-top:6px;font-size:10.5px;color:#8B95A1;">${total ? `${total} community reports so far` : ""}</div>
+      </div>`;
+
+  return (
+    `<b>${site.name}</b><br><i>${site.industryType}</i><br><br>${site.riskNotes}<br><br>` +
+    `<b>Nearest hospital:</b> ${site.hospital}<br><b>Nearest police:</b> ${site.police}` +
+    flagBanner +
+    voteBlock
+  );
+}
+
+async function castVote(siteId: string, vote: "fine" | "problem") {
+  const ref = doc(db, "industrialSites", siteId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const data = snap.data() as IndustrialSite;
+    const fine = (data.votesFine || 0) + (vote === "fine" ? 1 : 0);
+    const problem = (data.votesProblem || 0) + (vote === "problem" ? 1 : 0);
+    const total = fine + problem;
+    const alreadyFlagged = !!data.crowdFlagged;
+    const shouldFlag =
+      alreadyFlagged || (total >= VOTE_THRESHOLD_COUNT && problem / total > VOTE_FLAG_RATIO);
+
+    tx.update(ref, {
+      votesFine: fine,
+      votesProblem: problem,
+      crowdFlagged: shouldFlag,
+      ...(shouldFlag && !alreadyFlagged ? { crowdFlaggedAt: Date.now() } : {}),
+    });
+  });
+  localStorage.setItem(VOTED_KEY_PREFIX + siteId, "1");
+}
 
 export default function MapView() {
   const mapDivRef = useRef<HTMLDivElement>(null);
@@ -69,6 +123,29 @@ export default function MapView() {
       const police = L.layerGroup().addTo(map);
       const buffer = L.layerGroup().addTo(map);
 
+      map.on("popupopen", (e: LeafletNS.PopupEvent) => {
+        const el = e.popup.getElement();
+        if (!el) return;
+        el.querySelectorAll<HTMLButtonElement>(".sairis-vote-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const siteId = btn.dataset.site;
+            const vote = btn.dataset.vote as "fine" | "problem" | undefined;
+            if (!siteId || !vote) return;
+            const buttons = el.querySelectorAll<HTMLButtonElement>(".sairis-vote-btn");
+            const status = el.querySelector<HTMLDivElement>(`[data-status-for="${siteId}"]`);
+            buttons.forEach((b) => (b.disabled = true));
+            if (status) status.textContent = "Recording your report…";
+            try {
+              await castVote(siteId, vote);
+              if (status) status.textContent = "Thanks — recorded. Reopen this popup to see updated counts.";
+            } catch {
+              if (status) status.textContent = "Couldn't record your report — try again.";
+              buttons.forEach((b) => (b.disabled = false));
+            }
+          });
+        });
+      });
+
       leafletMapRef.current = map;
       layersRef.current = { industry, history, hospital, police, buffer };
     })();
@@ -91,6 +168,18 @@ export default function MapView() {
 
     sites.forEach((site) => {
       const color = STATUS_COLOR[site.status] || "#F2A900";
+
+      if (site.crowdFlagged) {
+        L.circleMarker([site.lat, site.lng], {
+          radius: 13,
+          color: "#D6483C",
+          weight: 2,
+          fill: false,
+          dashArray: "3,4",
+          className: "sairis-crowd-flag-ring",
+        }).addTo(layers.industry);
+      }
+
       L.circleMarker([site.lat, site.lng], {
         radius: 8,
         color,
@@ -98,9 +187,7 @@ export default function MapView() {
         fillOpacity: 0.85,
         weight: 2,
       })
-        .bindPopup(
-          `<b>${site.name}</b><br><i>${site.industryType}</i><br><br>${site.riskNotes}<br><br><b>Nearest hospital:</b> ${site.hospital}<br><b>Nearest police:</b> ${site.police}`
-        )
+        .bindPopup(votePopupHtml(site))
         .addTo(layers.industry);
 
       L.circle([site.lat, site.lng], {
@@ -213,9 +300,23 @@ export default function MapView() {
           />{" "}
           3km risk buffer
         </label>
-        <div className="disclaimer" style={{ marginTop: "14px", fontSize: "11px" }}>
-          Click any marker for risk notes, nearest responders, and source. Site and accident
-          records are live from the admin-managed register.
+        <div className="legend-row" style={{ marginTop: "14px" }}>
+          <span
+            style={{
+              width: "13px",
+              height: "13px",
+              borderRadius: "50%",
+              border: "2px dashed var(--red)",
+              flexShrink: 0,
+            }}
+          ></span>
+          Dashed red ring — community-flagged, pending admin verification
+        </div>
+        <div className="disclaimer" style={{ marginTop: "10px", fontSize: "11px" }}>
+          Click any marker for risk notes, nearest responders, and to report whether the site
+          looks like it&apos;s operating normally. Once 50+ community reports come in for a site
+          and over 80% say &quot;problem,&quot; it&apos;s flagged here for an admin to verify —
+          it does not change the official status until reviewed.
         </div>
       </div>
     </div>

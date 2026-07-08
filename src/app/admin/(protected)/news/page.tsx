@@ -55,7 +55,7 @@ export default function AdminNewsPage() {
     await deleteDoc(doc(db, "newsItems", id));
   }
 
-  async function refresh(source: "reliefweb" | "gdacs") {
+  async function refresh(source: "gdacs") {
     setRefreshing(source);
     setRefreshMsg("");
     try {
@@ -101,12 +101,11 @@ export default function AdminNewsPage() {
       <div className="card" style={{ marginBottom: "16px" }}>
         <h3>Pull latest from automated sources</h3>
         <p style={{ fontSize: "12.5px", color: "var(--muted)", marginTop: 0 }}>
-          Pulls into the draft queue below — nothing publishes automatically.
+          Pulls into the draft queue below — nothing publishes automatically. ReliefWeb
+          ingestion is disabled for now (pending an approved RELIEFWEB_APPNAME) — see the
+          &quot;Add news manually&quot; form below for verified items in the meantime.
         </p>
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button className="btn-ghost" onClick={() => refresh("reliefweb")} disabled={refreshing !== null}>
-            {refreshing === "reliefweb" ? "Refreshing…" : "Refresh from ReliefWeb"}
-          </button>
           <button className="btn-ghost" onClick={() => refresh("gdacs")} disabled={refreshing !== null}>
             {refreshing === "gdacs" ? "Refreshing…" : "Refresh from GDACS"}
           </button>

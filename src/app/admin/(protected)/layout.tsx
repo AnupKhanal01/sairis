@@ -10,6 +10,7 @@ import Link from "next/link";
 const ADMIN_LINKS = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/sites", label: "Industrial sites" },
+  { href: "/admin/crowd-flags", label: "Crowd reports" },
   { href: "/admin/accidents", label: "Historical accidents" },
   { href: "/admin/news", label: "News queue" },
   { href: "/admin/social", label: "Government agency feed" },

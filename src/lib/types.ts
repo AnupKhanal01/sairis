@@ -17,7 +17,19 @@ export interface IndustrialSite {
   status: SiteStatus;
   approximate?: boolean;
   updatedAt?: number;
+  votesFine?: number;
+  votesProblem?: number;
+  crowdFlagged?: boolean;
+  crowdFlaggedAt?: number;
+  crowdReviewedAt?: number;
+  crowdReviewedBy?: string;
 }
+
+// A crowdFlagged site (>=50 public reports, >80% saying "problem") is a pending
+// signal only — it shows on the map as needing verification, not as a confirmed
+// incident, until an admin reviews it in /admin/crowd-flags.
+export const VOTE_THRESHOLD_COUNT = 50;
+export const VOTE_FLAG_RATIO = 0.8;
 
 export interface HistoricalAccident {
   id: string;
@@ -35,7 +47,7 @@ export interface HistoricalAccident {
   source?: string;
 }
 
-export type NewsOrigin = "reliefweb" | "gdacs" | "admin";
+export type NewsOrigin = "gdacs" | "admin";
 export type NewsStatus = "draft" | "published" | "rejected";
 
 export interface NewsItem {

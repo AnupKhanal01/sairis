@@ -20,9 +20,7 @@ government-agency feed, citizen reporting, and a misinformation-verification boa
    (`FIREBASE_ADMIN_*`). Keep the `\n` sequences in `private_key` literal (don't turn them into
    real newlines in the `.env.local` file).
 7. Pick a random string for `CRON_SECRET` in `.env.local`.
-8. (Optional, needed for the ReliefWeb auto-pull) Register a free `appname` at
-   [apidoc.reliefweb.int](https://apidoc.reliefweb.int) and set `RELIEFWEB_APPNAME`.
-9. Deploy the security rules and indexes in this repo so the database actually enforces the
+8. Deploy the security rules and indexes in this repo so the database actually enforces the
    admin-only write rules:
    ```bash
    npx firebase-tools login
@@ -51,13 +49,14 @@ Re-running `npm run seed` is safe — sites/accidents are keyed by a stable slug
 - **Industrial sites & historical accidents** (`/gis`, `/analytics`) — admin-managed via
   `/admin/sites` and `/admin/accidents`; every visitor's browser updates instantly on save
   (Firestore `onSnapshot`), no page refresh.
-- **News feed** (`/social`, left column) — genuinely automated: `/admin/news` has "Refresh from
-  ReliefWeb" / "Refresh from GDACS" buttons that call the two ingestion API routes
-  (`src/app/api/ingest/*/route.ts`), which pull from ReliefWeb's public API and GDACS's public
+- **News feed** (`/social`, left column) — genuinely automated: `/admin/news` has a "Refresh
+  from GDACS" button that calls `src/app/api/ingest/gdacs/route.ts`, which pulls GDACS's public
   hazard RSS feed into a **draft queue**. An admin reviews and publishes each item — nothing
-  reaches the public feed unreviewed. In production, `vercel.json` also schedules these on a
-  cron (note: Vercel's Hobby plan limits cron frequency to once/day — the manual refresh buttons
-  work regardless of plan).
+  reaches the public feed unreviewed. In production, `vercel.json` also schedules this on a cron
+  (Vercel's Hobby plan limits cron frequency to once/day — the manual refresh button works
+  regardless of plan). ReliefWeb ingestion is not wired up (it now requires a pre-approved
+  `appname` — see `scripts/addVerifiedIncidents.ts` for how real incidents were added manually
+  in the meantime).
 - **Government agency feed** (`/social`, right column) — NDRRMA, Nepal Police and NEOC do not
   expose any public API or RSS feed (verified by research before building this — they publish
   via Twitter/X and Facebook only). This feed is intentionally manual: an admin reads the
@@ -67,6 +66,16 @@ Re-running `npm run seed` is safe — sites/accidents are keyed by a stable slug
 - **Citizen reports & misinformation board** — public can submit; only an authenticated admin
   (checked against Firestore security rules, not just UI) can reclassify a misinfo item or
   delete a report.
+- **Crowd site-status reports** (`/gis` marker popups) — any visitor can report whether a site
+  looks like it's "working fine" or "having a problem." Once a site collects 50+ reports and
+  over 80% say "problem," it gets a dashed-red ring on the map and shows up in
+  `/admin/crowd-flags` — this is a *pending signal only*, it does not change the site's official
+  status (color/marker) until an admin clicks "Confirm hazard" (→ sets status to `incident`) or
+  "Revert" (false alarm). Enforced server-side: `firestore.rules` lets a public write add exactly
+  one vote to one counter and only sets `crowdFlagged=true` when the 50/80% math actually holds;
+  it can never be unset by a public write, only by an admin. One vote per site per browser
+  (tracked in `localStorage`, not a hard guarantee against a determined bad actor, but reasonable
+  for this scope).
 
 ## 4. Admin access model
 
